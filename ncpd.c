@@ -104,6 +104,8 @@ main(int argc, char *argv[])
 	while (true) {
 		int len;
 		int fd;
+		struct stat sbuf;
+		struct timespec times[2];
 		ssize_t size;
 
 		len = sizeof(remote_addr);
@@ -160,6 +162,11 @@ main(int argc, char *argv[])
 			exit(1);
 		}
 
+		if (recv(sk2, &sbuf, sizeof(sbuf), 0) < 0) {
+			err_msg("recv()");
+			exit(1);
+		}
+
 		printf("Writing to %s\n", recv_buf);
 		lseek(fd, 0, SEEK_SET);
 		/* FIXME: handle recv error */
@@ -169,6 +176,13 @@ main(int argc, char *argv[])
 				exit(1);
 			}
 		}
+
+		/* FIXME: handle errors */
+		fchmod(fd, sbuf.st_mode & ~S_IFMT);
+		times[0] = sbuf.st_atim;
+		times[1] = sbuf.st_mtim;
+		futimens(fd, times);
+
 		close(fd);
 
 		printf("Closing connection from %s\n", inet_ntoa(remote_addr.sin_addr));

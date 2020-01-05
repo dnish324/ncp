@@ -141,6 +141,11 @@ main(int argc, char *argv[])
 			continue;
 		}
 
+		if (send(sk, &sbuf, sizeof(sbuf), 0) < 0) {
+			err_msg("send()");
+			exit(1);
+		}
+
 		if((fd = open(argv[i], O_RDONLY)) < 0) {
 			err_msg("open()");
 			exit(1);
