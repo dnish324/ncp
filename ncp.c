@@ -156,11 +156,6 @@ main(int argc, char *argv[])
 			}
 		}
 
-		/* notify EOF */
-		if (send(sk, send_buf, 0, 0) < 0) {
-			err_msg("send()");
-			exit(1);
-		}
 		close(fd);
 		close(sk);
 	}

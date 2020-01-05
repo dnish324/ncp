@@ -138,8 +138,7 @@ main(int argc, char *argv[])
 			if ((size = recv(sk2, recv_buf, BUFFSIZE, 0)) < 0) {
 				err_msg("recv()");
 				exit(1);
-			} else if (size == 0)
-				break;
+			}
 
 			if ((fd = open(recv_buf, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)) < 0) {
 				if (errno != EEXIST) {
