@@ -20,9 +20,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <arpa/inet.h>
 
 static char err_prefix[32];
@@ -48,9 +51,10 @@ main(int argc, char *argv[])
 	unsigned port;
 	int sk;
 	struct sockaddr_in remote_addr;
-	char *pw;
+	char *pw = NULL;
 	char recv_buf[BUFFSIZE];
 	char send_buf[BUFFSIZE];
+	int i;
 	int ret;
 
 	if (argc < 3) {
@@ -67,42 +71,98 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	sk = socket(AF_INET, SOCK_STREAM, 0);
-	if (sk < 0) {
-		err_msg("socket()");
-		exit(1);
-	}
-
 	memset(&remote_addr, 0, sizeof(remote_addr));
 	remote_addr.sin_family = AF_INET;
 	remote_addr.sin_addr.s_addr = dst_ip;
 	remote_addr.sin_port = htons(port);
 
-	if (connect(sk, (struct sockaddr *)&remote_addr, sizeof(remote_addr)) < 0) {
-		err_msg("connect()");
-		exit(1);
-	}
-	printf("Connected to %s\n", inet_ntoa(remote_addr.sin_addr));
+	/* send files */
+	for (i = 2; i < argc; i++) {
+		int fd;
+		struct stat sbuf;
+		ssize_t size;
 
-	/* handle password */
-	system("stty -echo >/dev/null 2>&1");
-	printf("Enter password: ");
-	scanf("%ms%*c", &pw);
-	printf("\n");
-	system("stty echo >/dev/null 2>&1");
+		if (stat(argv[i], &sbuf) < 0) {
+			err_msg("stat()");
+			exit(1);
+		} else if ((sbuf.st_mode & S_IFMT) != S_IFREG) {
+			fprintf(stderr, "Invalid type: skip copying %s...\n", argv[i]);
+			continue;
+		} else if (access(argv[i], R_OK) != 0) {
+			fprintf(stderr, "Don't have read permission: skip copying %s...\n", argv[i]);
+			continue;
+		}
 
-	strncpy(send_buf, pw, BUFFSIZE);
-	if (send(sk, send_buf, BUFFSIZE, 0) < 0) {
-		err_msg("send()");
-		exit(1);
-	}
-	if (recv(sk, recv_buf, BUFFSIZE, 0) < 0) {
-		err_msg("recv()");
-		exit(1);
-	}
-	if ((ret = atoi(recv_buf)) != 0) {
-		fprintf(stderr, "Invalid Password\n");
-		exit(1);
+		sk = socket(AF_INET, SOCK_STREAM, 0);
+		if (sk < 0) {
+			err_msg("socket()");
+			exit(1);
+		}
+
+		if (connect(sk, (struct sockaddr *)&remote_addr, sizeof(remote_addr)) < 0) {
+			err_msg("connect()");
+			exit(1);
+		}
+		printf("Connected to %s\n", inet_ntoa(remote_addr.sin_addr));
+
+		/* handle password */
+		if (pw == NULL) {
+			system("stty -echo >/dev/null 2>&1");
+			printf("Enter password: ");
+			scanf("%ms%*c", &pw);
+			printf("\n");
+			system("stty echo >/dev/null 2>&1");
+		}
+		strncpy(send_buf, pw, BUFFSIZE);
+		if (send(sk, send_buf, BUFFSIZE, 0) < 0) {
+			err_msg("send()");
+			exit(1);
+		}
+		if (recv(sk, recv_buf, BUFFSIZE, 0) < 0) {
+			err_msg("recv()");
+			exit(1);
+		}
+		if ((ret = atoi(recv_buf)) != 0) {
+			fprintf(stderr, "Invalid Password\n");
+			exit(1);
+		}
+
+		strncpy(send_buf, argv[i], BUFFSIZE);
+		if (send(sk, send_buf, BUFFSIZE, 0) < 0) {
+			err_msg("send()");
+			exit(1);
+		}
+		if (recv(sk, recv_buf, BUFFSIZE, 0) < 0) {
+			err_msg("recv()");
+			exit(1);
+		}
+		if ((ret = atoi(recv_buf)) != 0) {
+			fprintf(stderr, "%s: skip copying %s...\n", strerror(-ret), argv[i]);
+			continue;
+		}
+
+		if((fd = open(argv[i], O_RDONLY)) < 0) {
+			err_msg("open()");
+			exit(1);
+		}
+
+		printf("Sending %s\n", argv[i]);
+		lseek(fd, 0, SEEK_SET);
+		/* FIXME: handle read error */
+		while((size = read(fd, send_buf, BUFFSIZE)) > 0) {
+			if (send(sk, send_buf, size, 0) < 0) {
+				err_msg("send()");
+				exit(1);
+			}
+		}
+
+		/* notify EOF */
+		if (send(sk, send_buf, 0, 0) < 0) {
+			err_msg("send()");
+			exit(1);
+		}
+		close(fd);
+		close(sk);
 	}
 
 	free(pw);
