@@ -25,6 +25,7 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <arpa/inet.h>
 
 #define BUFFSIZE 1024
@@ -101,6 +102,10 @@ main(int argc, char *argv[])
 	listen(sk1, 16);
 
 	while (true) {
+		int len;
+		int fd;
+		ssize_t size;
+
 		len = sizeof(remote_addr);
 		sk2 = accept(sk1, (struct sockaddr *)&remote_addr, (socklen_t *)&len);
 		if (sk2 < 0) {
@@ -130,45 +135,42 @@ main(int argc, char *argv[])
 			}
 		}
 
-		/* recieve files */
-		while (true) {
-			int fd;
-			ssize_t size;
+		/* recieve file */
+		if ((size = recv(sk2, recv_buf, BUFFSIZE, 0)) < 0) {
+			err_msg("recv()");
+			exit(1);
+		}
 
-			if ((size = recv(sk2, recv_buf, BUFFSIZE, 0)) < 0) {
-				err_msg("recv()");
+		if ((fd = open(recv_buf, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)) < 0) {
+			if (errno != EEXIST) {
+				err_msg("open()");
 				exit(1);
 			}
-
-			if ((fd = open(recv_buf, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)) < 0) {
-				if (errno != EEXIST) {
-					err_msg("open()");
-					exit(1);
-				}
-				snprintf(send_buf, BUFFSIZE, "%d", -EEXIST);
-				if (send(sk2, send_buf, BUFFSIZE, 0) < 0) {
-					err_msg("send()");
-					exit(1);
-				}
-				break;
-			}
-			snprintf(send_buf, BUFFSIZE, "%d", 0);
+			snprintf(send_buf, BUFFSIZE, "%d", -EEXIST);
 			if (send(sk2, send_buf, BUFFSIZE, 0) < 0) {
 				err_msg("send()");
 				exit(1);
 			}
-
-			printf("Writing to %s\n", recv_buf);
-			lseek(fd, 0, SEEK_SET);
-			/* FIXME: handle recv error */
-			while ((size = recv(sk2, recv_buf, BUFFSIZE, 0)) > 0) {
-				if (write(fd, recv_buf, size) < 0) {
-					err_msg("write()");
-					exit(1);
-				}
-			}
-			close(fd);
+			close(sk2);
+			continue;
 		}
+		snprintf(send_buf, BUFFSIZE, "%d", 0);
+		if (send(sk2, send_buf, BUFFSIZE, 0) < 0) {
+			err_msg("send()");
+			exit(1);
+		}
+
+		printf("Writing to %s\n", recv_buf);
+		lseek(fd, 0, SEEK_SET);
+		/* FIXME: handle recv error */
+		while ((size = recv(sk2, recv_buf, BUFFSIZE, 0)) > 0) {
+			if (write(fd, recv_buf, size) < 0) {
+				err_msg("write()");
+				exit(1);
+			}
+		}
+		close(fd);
+
 		printf("Closing connection from %s\n", inet_ntoa(remote_addr.sin_addr));
 		close(sk2);
 	}
